@@ -113,10 +113,11 @@ images = load_images(folder_path)
 model = build_model()
 
 # Train the model using batches
-train_x, train_y = create_batch(images, 90)
+train_x, train_y = create_batch(images, 9000)
 
+model.load_weights('./checkpoints/model.weights.h5')
 
-model.fit(train_x, train_y, epochs=1, batch_size=8)
+model.fit(train_x, train_y, epochs=100, batch_size=32)
 
 model.save_weights('./checkpoints/model.weights.h5')
 
