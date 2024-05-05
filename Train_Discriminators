@@ -1,0 +1,139 @@
+import os
+import random
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from PIL import Image
+import numpy as np
+import tensorflow as tf
+from tensorflow.python.client import device_lib
+
+
+
+def load_images(folder_path):
+    images = []
+    image_files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])
+    for image_file in image_files:
+        image_path = os.path.join(folder_path, image_file)
+        image = Image.open(image_path)
+        image = image.resize((64, 64))  # Resize for faster training
+        image = np.array(image) / 255.0  # Normalize pixel values
+        images.append(image)
+    return np.array(images)
+
+
+def create_dataset(images, data_size):
+    x = []
+    y = []
+
+    for i in range(data_size):
+
+        # We start at a random location
+        start_index = random.randint(0, len(images)-10)
+
+        # We get the input frames
+        input_frames = images[start_index:start_index + 4]  # Results in (5, 64, 64, 3)
+        stacked_input_frames = np.concatenate(input_frames, axis=-1)  # Stack input frames along the last axis, results in (64, 64, 12)
+
+        fakeness = random.uniform(0, 1)
+        if random.randint(0, 1) == 1:
+            output_frame = (images[start_index + 4]*(1-fakeness))+images[random.randint(0, len(images)-10)]*(fakeness)   # Results in (64, 64, 3)
+        else:
+            # Use pure noise as the alternative output
+            noise = np.random.uniform(0, 1, size=(64, 64, 3))  # Generate pure noise array
+            output_frame = (images[start_index + 4]*(1-fakeness))+noise*(fakeness)   # Results in (64, 64, 3)
+
+        # Concatenate stacked_input_frames with output_frame
+        stacked_input_frames = np.concatenate([stacked_input_frames, output_frame], axis=-1)
+
+
+        x.append(stacked_input_frames)
+        y.append(fakeness)
+
+    return np.array(x), np.array(y)
+
+
+def build_discriminator():
+    # Define input layers for both types of inputs
+    input_img = tf.keras.layers.Input(shape=(64, 64, 15))
+
+    # Concatenate both inputs
+
+    # Convolutional layers
+    first = tf.keras.layers.Conv2D(32, (3, 3), strides=(1, 1), padding='same')(input_img)
+    first = tf.keras.layers.LeakyReLU()(first)
+    # 32, 32, 32
+
+    conv1 = tf.keras.layers.Conv2D(64, (3, 3), strides=(2, 2), padding='same')(first)
+    conv1 = tf.keras.layers.BatchNormalization()(conv1)
+    conv1 = tf.keras.layers.LeakyReLU()(conv1)
+    # 16, 16, 64
+
+    conv2 = tf.keras.layers.Conv2D(128, (3, 3), strides=(2, 2), padding='same')(conv1)
+    conv2 = tf.keras.layers.BatchNormalization()(conv2)
+    conv2 = tf.keras.layers.LeakyReLU()(conv2)
+    # 8, 8, 128
+
+    conv3 = tf.keras.layers.Conv2D(256, (3, 3), strides=(2, 2), padding='same')(conv2)
+    conv3 = tf.keras.layers.BatchNormalization()(conv3)
+    conv3 = tf.keras.layers.LeakyReLU()(conv3)
+    # 4, 4, 256
+
+    # Flatten layer
+    flat = tf.keras.layers.Flatten()(conv3)
+
+    # Dense layers
+    dense1 = tf.keras.layers.Dense(256)(flat)
+    dense1 = tf.keras.layers.BatchNormalization()(dense1)
+    dense1 = tf.keras.layers.LeakyReLU()(dense1)
+
+    dense2 = tf.keras.layers.Dense(32)(dense1)
+    dense2 = tf.keras.layers.BatchNormalization()(dense2)
+    dense2 = tf.keras.layers.LeakyReLU()(dense2)
+
+    dense3 = tf.keras.layers.Dense(8)(dense2)
+    dense3 = tf.keras.layers.BatchNormalization()(dense3)
+    dense3 = tf.keras.layers.LeakyReLU()(dense3)
+
+    # Output layer
+    outputs = tf.keras.layers.Dense(1)(dense3)
+
+    # Define the model
+    model = tf.keras.Model(inputs=input_img, outputs=outputs)
+
+    # Compile the model
+    model.compile(optimizer='adam',
+                  loss='mse',  # Change loss function to mean squared error for regression
+                  metrics=['accuracy'])
+
+    return model
+
+
+
+
+# Replace 'folder_path' with the path to your folder containing images
+folder_path = 'C:/Users/G_Cha/Videos/ShortWater'
+images = load_images(folder_path)
+
+
+
+#discriminator = build_discriminator()
+discriminator = tf.keras.models.load_model('./checkpoints/discriminator2.keras')
+
+
+
+while True:
+    train_x, train_y = create_dataset(images, 2000)
+    discriminator.fit(train_x, train_y, epochs=120, batch_size=32)
+    discriminator.save('./checkpoints/discriminator2.keras')
+
+
+predictions = discriminator.predict(train_x[0:5])
+for i in range(len(predictions)):
+    plt.figure(figsize=(8, 4))
+    plt.subplot(1, 2, 1)
+    plt.imshow(train_x[i, :, :, 12:15])  # Display only the input frames, excluding the output frame
+    plt.title(predictions[i])
+    plt.axis('off')
+
+
+    plt.show()
