@@ -1,0 +1,189 @@
+import os
+import random
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from PIL import Image
+import numpy as np
+
+import tensorflow as tf
+print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+print(tf.__version__)
+
+from tensorflow.python.client import device_lib
+print(device_lib.list_local_devices())
+
+print(tf.config.list_physical_devices('GPU'))
+
+
+def load_images(folder_path):
+    images = []
+    image_files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])
+    for image_file in image_files:
+        image_path = os.path.join(folder_path, image_file)
+        image = Image.open(image_path)
+        image = image.resize((64, 64))  # Resize for faster training
+        image = np.array(image) / 255.0  # Normalize pixel values
+        images.append(image)
+    return np.array(images)
+
+
+
+
+def create_dataset(images, size):
+    batch_input_frames = []
+    batch_output_frames = []
+
+
+    for i in range(size):
+
+        start_index = random.randint(0, len(images)-1)
+
+
+        noise =  np.random.normal(loc=0.0, scale=random.uniform(0, 1), size=images[start_index].shape)
+
+        input_frames = images[start_index] + noise
+
+        output_frames = noise
+
+        batch_input_frames.append(input_frames)
+        batch_output_frames.append(output_frames)
+
+    return np.array(batch_input_frames), np.array(batch_output_frames)
+
+def create_dataset_vae(images):
+    batch_frames = []
+
+    start_index = 0
+
+    for i in range(len(images)-6):
+        start_index += 1
+        input_frames = images[start_index]  # Results in (4, 64, 64, 3)
+
+        batch_frames.append(input_frames)
+
+    return np.array(batch_frames)
+
+
+
+import tensorflow as tf
+
+
+def encoder_block(inputs, filters):
+    conv = tf.keras.layers.Conv2D(filters, (3,3), strides=(2,2), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(inputs)
+    #conv = tf.keras.layers.BatchNormalization()(conv)
+    conv = tf.keras.layers.LeakyReLU()(conv)
+    return conv
+
+def decoder_block(inputs, filters, merge_with):
+    #noise = tf.keras.layers.GaussianNoise(0.05)(inputs)
+    upsample = tf.keras.layers.Conv2DTranspose(filters,(3,3), strides=(2,2), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(inputs)
+    #upsample = tf.keras.layers.BatchNormalization()(upsample)
+    upsample = tf.keras.layers.LeakyReLU()(upsample)
+
+    upsample = tf.keras.layers.concatenate([upsample, merge_with], axis=3)
+    return upsample
+
+
+def skip_block(inputs, filters):
+    upsample = tf.keras.layers.Conv2DTranspose(filters,(3,3), strides=(1,1), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(inputs)
+    upsample = tf.keras.layers.LayerNormalization()(upsample)
+    upsample = tf.keras.layers.LeakyReLU()(upsample)
+
+    upsample = tf.keras.layers.concatenate([upsample, inputs], axis=3)
+
+    upsample2 = tf.keras.layers.Conv2DTranspose(16,(3,3), strides=(1,1), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(upsample)
+    upsample2 = tf.keras.layers.LayerNormalization()(upsample2)
+    upsample2 = tf.keras.layers.LeakyReLU()(upsample2)
+
+    upsample3 = tf.keras.layers.concatenate([upsample2, upsample], axis=3)
+
+    upsample4 = tf.keras.layers.Conv2DTranspose(8,(5,5), strides=(1,1), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(upsample3)
+    upsample4 = tf.keras.layers.LayerNormalization()(upsample4)
+    upsample4 = tf.keras.layers.LeakyReLU()(upsample4)
+
+    output = tf.keras.layers.concatenate([upsample3, upsample4], axis=3)
+
+
+    return output
+
+def build_generator():
+    inputs = tf.keras.layers.Input(shape=(64, 64, 3))
+
+    # Encoder
+    conv1 = encoder_block(inputs, 32) #32, 32
+    conv1s = skip_block(conv1, 32)
+
+    conv2 = encoder_block(conv1s, 64) #16, 16
+    conv2s = skip_block(conv2, 64)
+
+    conv3 = encoder_block(conv2s, 128) #8, 8
+    conv3s = skip_block(conv3, 64)
+
+    conv4 = encoder_block(conv3s, 128) #4, 4
+    conv4s = skip_block(conv4, 64)
+
+    # Decoder
+
+    up0 = decoder_block(conv4s, 128, conv3s)  # 8, 8
+    up0s = skip_block(up0, 64)
+
+    up1 = decoder_block(up0s, 128, conv2s) #16, 16
+    up1s = skip_block(up1, 64)
+
+    up2 = decoder_block(up1s, 64, conv1s) #32, 32
+    up2s = skip_block(up2, 64)
+
+    up3 = decoder_block(up2s, 32, inputs) #64, 64
+    up3s = skip_block(up3, 32)
+
+    # Output layer
+    outputs = tf.keras.layers.Conv2D(3, (3, 3), padding='same', activation='relu')(up3s)
+
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+
+    return model
+
+
+# Replace 'folder_path' with the path to your folder containing images
+folder_path = 'C:/Users/G_Cha/Videos/ShortWater'
+images = load_images(folder_path)
+
+
+generator = build_generator()
+optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+generator.compile(optimizer=optimizer, loss='mse')
+
+#generator = tf.keras.models.load_model('./checkpoints/diff.keras')
+
+
+
+#model_predictor.load_weights('./checkpoints/model.weights.h5')
+#model_vae.load_weights('./checkpoints/model_vae.weights.h5')
+
+
+
+while True:
+
+
+    train_x, train_y = create_dataset(images, 10000)
+    generator.fit(train_x, train_y, epochs=15, batch_size=32, shuffle=True)
+
+
+    generator.save('./checkpoints/diff.keras')
+
+
+    predicted_image = train_x[0]
+    predicted_image = np.expand_dims(predicted_image, axis=0)
+
+
+    for i in range(120):
+
+        predicted_image = predicted_image-generator.predict(predicted_image)*0.01
+        predicted_image = np.clip(predicted_image, 0, 1)
+
+        save_path = os.path.join("C:/Users/G_Cha/Videos/Predicted", f"predicted_image_{i}.png")
+        n = np.clip(predicted_image[0], 0, 1)
+        plt.imsave(save_path, n)  # Save the image using matplotlib
+
+
+
