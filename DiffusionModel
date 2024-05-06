@@ -69,15 +69,15 @@ import tensorflow as tf
 
 
 def encoder_block(inputs, filters):
-    conv = tf.keras.layers.Conv2D(filters, (3,3), strides=(2,2), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(inputs)
-    #conv = tf.keras.layers.BatchNormalization()(conv)
+    conv = tf.keras.layers.Conv2D(filters, (3,3), strides=(2,2), padding='same')(inputs)
+    conv = tf.keras.layers.LayerNormalization()(conv)
     conv = tf.keras.layers.LeakyReLU()(conv)
     return conv
 
 def decoder_block(inputs, filters, merge_with):
-    #noise = tf.keras.layers.GaussianNoise(0.05)(inputs)
-    upsample = tf.keras.layers.Conv2DTranspose(filters,(3,3), strides=(2,2), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(inputs)
-    #upsample = tf.keras.layers.BatchNormalization()(upsample)
+
+    upsample = tf.keras.layers.Conv2DTranspose(filters,(3,3), strides=(2,2), padding='same')(inputs)
+    upsample = tf.keras.layers.LayerNormalization()(upsample)
     upsample = tf.keras.layers.LeakyReLU()(upsample)
 
     upsample = tf.keras.layers.concatenate([upsample, merge_with], axis=3)
@@ -85,23 +85,12 @@ def decoder_block(inputs, filters, merge_with):
 
 
 def skip_block(inputs, filters):
-    upsample = tf.keras.layers.Conv2DTranspose(filters,(3,3), strides=(1,1), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(inputs)
+    upsample = tf.keras.layers.Conv2DTranspose(filters,(3,3), strides=(1,1), padding='same')(inputs)
     upsample = tf.keras.layers.LayerNormalization()(upsample)
     upsample = tf.keras.layers.LeakyReLU()(upsample)
 
-    upsample = tf.keras.layers.concatenate([upsample, inputs], axis=3)
+    output = tf.keras.layers.Add()([upsample, inputs])
 
-    upsample2 = tf.keras.layers.Conv2DTranspose(16,(3,3), strides=(1,1), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(upsample)
-    upsample2 = tf.keras.layers.LayerNormalization()(upsample2)
-    upsample2 = tf.keras.layers.LeakyReLU()(upsample2)
-
-    upsample3 = tf.keras.layers.concatenate([upsample2, upsample], axis=3)
-
-    upsample4 = tf.keras.layers.Conv2DTranspose(8,(5,5), strides=(1,1), padding='same', kernel_regularizer=tf.keras.regularizers.l2(0.001))(upsample3)
-    upsample4 = tf.keras.layers.LayerNormalization()(upsample4)
-    upsample4 = tf.keras.layers.LeakyReLU()(upsample4)
-
-    output = tf.keras.layers.concatenate([upsample3, upsample4], axis=3)
 
 
     return output
@@ -117,24 +106,24 @@ def build_generator():
     conv2s = skip_block(conv2, 64)
 
     conv3 = encoder_block(conv2s, 128) #8, 8
-    conv3s = skip_block(conv3, 64)
+    conv3s = skip_block(conv3, 128)
 
     conv4 = encoder_block(conv3s, 128) #4, 4
-    conv4s = skip_block(conv4, 64)
+    conv4s = skip_block(conv4, 128)
 
     # Decoder
 
     up0 = decoder_block(conv4s, 128, conv3s)  # 8, 8
-    up0s = skip_block(up0, 64)
+    up0s = skip_block(up0, 256)
 
     up1 = decoder_block(up0s, 128, conv2s) #16, 16
-    up1s = skip_block(up1, 64)
+    up1s = skip_block(up1, 192)
 
     up2 = decoder_block(up1s, 64, conv1s) #32, 32
-    up2s = skip_block(up2, 64)
+    up2s = skip_block(up2, 96)
 
     up3 = decoder_block(up2s, 32, inputs) #64, 64
-    up3s = skip_block(up3, 32)
+    up3s = skip_block(up3, 35)
 
     # Output layer
     outputs = tf.keras.layers.Conv2D(3, (3, 3), padding='same', activation='relu')(up3s)
@@ -153,7 +142,7 @@ generator = build_generator()
 optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
 generator.compile(optimizer=optimizer, loss='mse')
 
-#generator = tf.keras.models.load_model('./checkpoints/diff.keras')
+generator = tf.keras.models.load_model('./checkpoints/diff.keras')
 
 
 
@@ -166,7 +155,7 @@ while True:
 
 
     train_x, train_y = create_dataset(images, 10000)
-    generator.fit(train_x, train_y, epochs=15, batch_size=32, shuffle=True)
+    generator.fit(train_x, train_y, epochs=2, batch_size=12, shuffle=True)
 
 
     generator.save('./checkpoints/diff.keras')
