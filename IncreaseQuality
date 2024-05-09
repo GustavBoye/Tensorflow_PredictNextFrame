@@ -57,7 +57,7 @@ def load_images(folder_path):
 
 
 def blurred(image):
-    amount = random.randint(64, 256)
+    amount = random.randint(32, 256)
 
     downsampled_image = tf.image.resize(image, (amount, amount))
     upsampled_image = tf.image.resize(downsampled_image, (256, 256))
@@ -67,6 +67,9 @@ def blurred(image):
 def create_dataset(images, size, crop_size=(256, 256)):
     batch_input_frames = []
     batch_output_frames = []
+
+    batch_output_frames.clear()
+    batch_output_frames.clear()
 
     for i in range(size):
         start_index = random.randint(0, len(images)-1)
@@ -80,7 +83,7 @@ def create_dataset(images, size, crop_size=(256, 256)):
         cropped_image = image[top:top+crop_size[0], left:left+crop_size[1]]
 
         # Add random noise to cropped image
-        noise = np.random.normal(loc=0.0, scale=random.uniform(0, 0.1), size=cropped_image.shape)
+        noise = np.random.normal(loc=0.0, scale=random.uniform(0, 0.08), size=cropped_image.shape)
         input_frames = blurred(cropped_image) + noise
         output_frames = cropped_image
 
@@ -89,22 +92,7 @@ def create_dataset(images, size, crop_size=(256, 256)):
 
     return np.array(batch_input_frames), np.array(batch_output_frames)
 
-def create_dataset_vae(images):
-    batch_frames = []
 
-    start_index = 0
-
-    for i in range(len(images)-6):
-        start_index += 1
-        input_frames = images[start_index]  # Results in (4, 64, 64, 3)
-
-        batch_frames.append(input_frames)
-
-    return np.array(batch_frames)
-
-
-
-import tensorflow as tf
 
 
 def encoder_block(inputs, filters):
@@ -140,24 +128,27 @@ def skip_block(inputs, filters):
 def build_generator():
     inputs = tf.keras.layers.Input(shape=(256, 256, 3))
 
-    f = tf.keras.layers.Conv2DTranspose(32,(1,1), strides=(1,1), padding='same')(inputs)
+    f = tf.keras.layers.Conv2DTranspose(8,(1,1), strides=(1,1), padding='same')(inputs)
+    f = tf.keras.layers.LayerNormalization()(f)
     f = tf.keras.layers.LeakyReLU()(f)
 
+    f = tf.keras.layers.concatenate([f, inputs])
+
     # Encoder
-    conv0 = encoder_block(f, 16) #128
-    conv1 = encoder_block(conv0, 32) #64
-    conv2 = encoder_block(conv1, 64) #32
-    conv3 = encoder_block(conv2, 128) #16
-    conv4 = encoder_block(conv3, 256) #8
-    conv5 = encoder_block(conv4, 256)  #4
-    conv6 = encoder_block(conv5, 256)  #2
+    conv0 = encoder_block(f, 8) #128
+    conv1 = encoder_block(conv0, 16) #64
+    conv2 = encoder_block(conv1, 32) #32
+    conv3 = encoder_block(conv2, 64) #16
+    conv4 = encoder_block(conv3, 128) #8
+    conv5 = encoder_block(conv4, 128)  #4
+    conv6 = encoder_block(conv5, 128)  #2
 
     # Decoder
 
-    upF2 = decoder_block(conv6, 256, conv5)  # 4
-    upF = decoder_block(upF2, 256, conv4)  # 8
+    upF2 = decoder_block(conv6, 128, conv5)  # 4
+    upF = decoder_block(upF2, 128, conv4)  # 8
     up0 = decoder_block(upF, 128, conv3)  # 16
-    up1 = decoder_block(up0, 64, conv2) #32
+    up1 = decoder_block(up0, 128, conv2) #32
     up2 = decoder_block(up1, 32, conv1) #64
     up3 = decoder_block(up2, 16, conv0) #128
     up4 = decoder_block(up3, 8, f)  # 256
@@ -180,7 +171,7 @@ if create_new == True:
     generator.compile(optimizer=optimizer, loss='mse')
     print(generator.summary())
 else:
-    generator = tf.keras.models.load_model('./checkpoints/diff2.keras')
+    generator = tf.keras.models.load_model('./checkpoints/unet_sharpen.keras')
     print(generator.summary())
 
 
@@ -201,7 +192,7 @@ for i in range(len(train_x)):
     input_image = np.expand_dims(input_image, axis=0)
 
     # Save the original image
-    save_path_original = os.path.join("C:/Users/G_Cha/Videos/Predicted", f"input_image_{i}_original.png")
+    save_path_original = os.path.join("C:/Users/G_Cha/Videos/Predicted", f"image_{i}_original.png")
     plt.imsave(save_path_original, np.clip(input_image[0], 0, 1))
 
     # Predict with the generator model
@@ -211,19 +202,20 @@ for i in range(len(train_x)):
     predicted_image = np.clip(predicted_image, 0, 1)
 
     # Save the predicted image
-    save_path_predicted = os.path.join("C:/Users/G_Cha/Videos/Predicted", f"predicted_image_{i}.png")
+    save_path_predicted = os.path.join("C:/Users/G_Cha/Videos/Predicted", f"image_{i}.png")
     plt.imsave(save_path_predicted, np.clip(predicted_image[0], 0, 1))
 
 
 
 
 
+for i in range(10):
+    print(i)
+    train_x, train_y = create_dataset(images, 1000)
+    generator.fit(train_x, train_y, epochs=1, batch_size=6, shuffle=True)
 
-train_x, train_y = create_dataset(images, 4000)
-generator.fit(train_x, train_y, epochs=10, batch_size=6, shuffle=True)
 
-
-generator.save('./checkpoints/diff2.keras')
+generator.save('./checkpoints/unet_sharpen.keras')
 
 
 
