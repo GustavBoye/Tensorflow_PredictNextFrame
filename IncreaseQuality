@@ -93,6 +93,34 @@ def create_dataset(images, size, crop_size=(256, 256)):
     return np.array(batch_input_frames), np.array(batch_output_frames)
 
 
+def create_dataset_generator(images, crop_size=(256, 256)):
+    while True:
+        batch_input_frames = []
+        batch_output_frames = []
+
+        batch_output_frames.clear()
+        batch_output_frames.clear()
+
+        for i in range(6):
+            start_index = random.randint(0, len(images)-1)
+            image = images[start_index]
+
+            # Randomly select top-left corner for cropping
+            top = random.randint(0, image.shape[0] - crop_size[0])
+            left = random.randint(0, image.shape[1] - crop_size[1])
+
+            # Crop the image
+            cropped_image = image[top:top+crop_size[0], left:left+crop_size[1]]
+
+            # Add random noise to cropped image
+            noise = np.random.normal(loc=0.0, scale=random.uniform(0, 0.08), size=cropped_image.shape)
+            input_frames = blurred(cropped_image) + noise
+            output_frames = cropped_image
+
+            batch_input_frames.append(input_frames)
+            batch_output_frames.append(output_frames)
+
+        yield np.array(batch_input_frames), np.array(batch_output_frames)
 
 
 def encoder_block(inputs, filters):
@@ -209,13 +237,29 @@ for i in range(len(train_x)):
 
 
 
-for i in range(10):
-    print(i)
-    train_x, train_y = create_dataset(images, 1000)
-    generator.fit(train_x, train_y, epochs=1, batch_size=6, shuffle=True)
+# Define the maximum number of epochs
+max_epochs = 10
+
+# Create a custom callback to save the model after a certain number of epochs
+class CustomCallback(tf.keras.callbacks.Callback):
+    def __init__(self):
+        super(CustomCallback, self).__init__()
+
+    def on_epoch_end(self, epoch, logs=None):
+        if epoch % 10 == 0:
+            print(f"Saving the model...")
+            self.model.save('./checkpoints/unet_sharpen.keras')
+
+# Train the model using the generator and custom callback
+epochs = 200  # You can adjust this value as needed
+batch_size = 4
+
+# Define the steps_per_epoch as a multiple of the dataset size to ensure it completes at least one full pass through the dataset
+steps_per_epoch = len(images) // batch_size
 
 
-generator.save('./checkpoints/unet_sharpen.keras')
+while True:
+    generator.fit(create_dataset_generator(images), epochs=epochs, steps_per_epoch=steps_per_epoch, callbacks=[CustomCallback()])
 
 
 
