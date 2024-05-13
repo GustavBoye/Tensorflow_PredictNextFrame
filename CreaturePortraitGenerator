@@ -1,0 +1,270 @@
+import os
+import random
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from PIL import Image
+import numpy as np
+
+import tensorflow as tf
+print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+print(tf.__version__)
+
+from tensorflow.python.client import device_lib
+print(device_lib.list_local_devices())
+
+print(tf.config.list_physical_devices('GPU'))
+
+
+def load_cropped(folder_path, crop_size=(256, 256)):
+    images = []
+    image_files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])
+    for image_file in image_files:
+        image_path = os.path.join(folder_path, image_file)
+        image = Image.open(image_path)
+
+        # Convert RGBA images to RGB
+        if image.mode == 'RGBA':
+            image = image.convert('RGB')
+
+        # Randomly crop the image to the desired size
+        width, height = image.size
+        if width > crop_size[0] and height > crop_size[1]:
+            left = random.randint(0, width - crop_size[0])
+            top = random.randint(0, height - crop_size[1])
+            right = left + crop_size[0]
+            bottom = top + crop_size[1]
+            image = image.crop((left, top, right, bottom))
+
+        image = np.array(image) / 255.0  # Normalize pixel values
+        images.append(image)
+    return np.array(images)
+
+def load_images(folder_path):
+    images = []
+    image_files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])
+    for image_file in image_files:
+        image_path = os.path.join(folder_path, image_file)
+        image = Image.open(image_path)
+
+        # Convert RGBA images to RGB
+        if image.mode == 'RGBA':
+            image = image.convert('RGB')
+
+        image = np.array(image) / 255.0  # Normalize pixel values
+        image = tf.image.resize(image, (270, 270))
+        images.append(image)
+    return np.array(images)
+
+
+
+def blurred(image):
+    amount = random.randint(32, 256)
+
+    downsampled_image = tf.image.resize(image, (amount, amount))
+    upsampled_image = tf.image.resize(downsampled_image, (256, 256))
+    return upsampled_image
+
+
+def create_dataset(images, size, crop_size=(256, 256)):
+    batch_input_frames = []
+    batch_output_frames = []
+
+    batch_output_frames.clear()
+    batch_output_frames.clear()
+
+    for i in range(size):
+        start_index = random.randint(0, len(images)-1)
+        image = images[start_index]
+
+        # Randomly select top-left corner for cropping
+        top = random.randint(0, image.shape[0] - crop_size[0])
+        left = random.randint(0, image.shape[1] - crop_size[1])
+
+        # Crop the image
+        cropped_image = image[top:top+crop_size[0], left:left+crop_size[1]]
+
+        # Add random noise to cropped image
+        noise = np.random.normal(loc=0.0, scale=random.uniform(0, 0.08), size=cropped_image.shape)
+        input_frames = blurred(cropped_image) + noise
+        output_frames = cropped_image
+
+        batch_input_frames.append(input_frames)
+        batch_output_frames.append(output_frames)
+
+    return np.array(batch_input_frames), np.array(batch_output_frames)
+
+
+def create_dataset_generator(images, crop_size=(256, 256)):
+    while True:
+        batch_input_frames = []
+        batch_output_frames = []
+
+        batch_output_frames.clear()
+        batch_output_frames.clear()
+
+        for i in range(6):
+            start_index = random.randint(0, len(images)-1)
+            image = images[start_index]
+
+            # Randomly select top-left corner for cropping
+            top = random.randint(0, image.shape[0] - crop_size[0])
+            left = random.randint(0, image.shape[1] - crop_size[1])
+
+            # Crop the image
+            cropped_image = image[top:top+crop_size[0], left:left+crop_size[1]]
+
+            # Add random noise to cropped image
+            noise = np.random.normal(loc=0.0, scale=random.uniform(0, 1), size=cropped_image.shape)
+            input_frames = cropped_image + noise
+            output_frames = noise
+
+            batch_input_frames.append(input_frames)
+            batch_output_frames.append(output_frames)
+
+        yield np.array(batch_input_frames), np.array(batch_output_frames)
+
+
+def encoder_block(inputs, filters):
+    conv = tf.keras.layers.Conv2D(filters, (3,3), strides=(2,2), padding='same')(inputs)
+    conv = tf.keras.layers.LayerNormalization()(conv)
+    conv = tf.keras.layers.LeakyReLU()(conv)
+
+
+    return conv
+
+def decoder_block(inputs, filters, merge_with):
+
+    upsample = tf.keras.layers.Conv2DTranspose(filters,(3,3), strides=(2,2), padding='same')(inputs)
+    upsample = tf.keras.layers.LayerNormalization()(upsample)
+    upsample = tf.keras.layers.LeakyReLU()(upsample)
+    upsample = tf.keras.layers.concatenate([upsample, merge_with], axis=3)
+
+    return upsample
+
+
+def skip_block(inputs, filters):
+    upsample = tf.keras.layers.Conv2DTranspose(filters,(1,1), strides=(1,1), padding='same')(inputs)
+    upsample = tf.keras.layers.LayerNormalization()(upsample)
+    upsample = tf.keras.layers.LeakyReLU()(upsample)
+
+    upsample2 = tf.keras.layers.Conv2DTranspose(filters,(1,1), strides=(1,1), padding='same')(upsample)
+    upsample2 = tf.keras.layers.LeakyReLU()(upsample2)
+
+    output = upsample+upsample2
+
+    return output
+
+def build_generator():
+    inputs = tf.keras.layers.Input(shape=(256, 256, 3))
+
+    f = tf.keras.layers.Conv2DTranspose(8,(1,1), strides=(1,1), padding='same')(inputs)
+    f = tf.keras.layers.LayerNormalization()(f)
+    f = tf.keras.layers.LeakyReLU()(f)
+
+    f = tf.keras.layers.concatenate([f, inputs])
+
+    # Encoder
+    conv0 = encoder_block(f, 8) #128
+    conv1 = encoder_block(conv0, 16) #64
+    conv2 = encoder_block(conv1, 32) #32
+    conv3 = encoder_block(conv2, 64) #16
+    conv4 = encoder_block(conv3, 128) #8
+    conv5 = encoder_block(conv4, 128)  #4
+    conv6 = encoder_block(conv5, 128)  #2
+
+    # Decoder
+
+    upF2 = decoder_block(conv6, 128, conv5)  # 4
+    upF = decoder_block(upF2, 128, conv4)  # 8
+    up0 = decoder_block(upF, 128, conv3)  # 16
+    up1 = decoder_block(up0, 128, conv2) #32
+    up2 = decoder_block(up1, 32, conv1) #64
+    up3 = decoder_block(up2, 16, conv0) #128
+    up4 = decoder_block(up3, 8, f)  # 256
+
+    # Output layer
+    outputs = tf.keras.layers.Conv2D(3, (3, 3), padding='same')(up4)
+
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+
+    return model
+
+
+
+
+create_new = False
+
+if create_new == True:
+    generator = build_generator()
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+    generator.compile(optimizer=optimizer, loss='mse')
+    print(generator.summary())
+else:
+    generator = tf.keras.models.load_model('./checkpoints/unet_sharpen.keras')
+    print(generator.summary())
+
+
+
+folder_path = 'C:/Users/G_Cha/Videos/ShortWater'
+images = load_images(folder_path)
+
+
+train_x, train_y = create_dataset(images, 50)
+
+
+
+for i in range(len(train_x)):
+    # Get the input image
+    input_image = train_x[i]
+
+    # Ensure input image has batch dimension
+    input_image = np.expand_dims(input_image, axis=0)
+
+    # Save the original image
+    save_path_original = os.path.join("C:/Users/G_Cha/Videos/Predicted", f"image_{i}_original.png")
+    plt.imsave(save_path_original, np.clip(input_image[0], 0, 1))
+
+    # Predict with the generator model
+    predicted_image = input_image-generator.predict(input_image)
+
+    # Clip values to [0, 1] range
+    predicted_image = np.clip(predicted_image, 0, 1)
+
+    # Save the predicted image
+    save_path_predicted = os.path.join("C:/Users/G_Cha/Videos/Predicted", f"image_{i}.png")
+    plt.imsave(save_path_predicted, np.clip(predicted_image[0], 0, 1))
+
+
+
+
+
+# Define the maximum number of epochs
+max_epochs = 10
+
+# Create a custom callback to save the model after a certain number of epochs
+class CustomCallback(tf.keras.callbacks.Callback):
+    def __init__(self):
+        super(CustomCallback, self).__init__()
+
+    def on_epoch_end(self, epoch, logs=None):
+        if epoch % 10 == 0:
+            print(f"Saving the model...")
+            self.model.save('./checkpoints/unet_sharpen.keras')
+
+# Train the model using the generator and custom callback
+epochs = 200  # You can adjust this value as needed
+batch_size = 4
+
+# Define the steps_per_epoch as a multiple of the dataset size to ensure it completes at least one full pass through the dataset
+steps_per_epoch = len(images) // batch_size
+
+
+while True:
+    generator.fit(create_dataset_generator(images), epochs=epochs, steps_per_epoch=steps_per_epoch, callbacks=[CustomCallback()])
+
+
+
+
+
+
+
